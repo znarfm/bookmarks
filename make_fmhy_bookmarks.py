@@ -1,8 +1,13 @@
 import requests
+from collections import defaultdict
 
-def addPretext(lines, sectionName, baseURL, subURL):
+# Reuse a single HTTP session for all downloads to avoid repeated TCP
+# handshakes and keep the code easier to test.
+session = requests.Session()
+
+
+def addPretext(lines, sectionName, subURL):
     modified_lines = []
-    currMdSubheading = ""
     currSubCat = ""
     currSubSubCat = ""
 
@@ -12,30 +17,33 @@ def addPretext(lines, sectionName, baseURL, subURL):
     #Parse headings
     for line in lines:
         if line.startswith("#"): #Title Lines
-            if not subURL=="storage":
+            if subURL != "storage":
                 if line.startswith("# ►"):
-                    currMdSubheading = "#" + line.replace("# ►", "").strip().replace(" / ", "-").replace(" ", "-").lower()
                     currSubCat = line.replace("# ►", "").strip()
                     currSubSubCat = "/"
                 elif line.startswith("## ▷"):
-                    if not subURL=="non-english": #Because non-eng section has multiple subsubcats with same names
-                        currMdSubheading = "#" + line.replace("## ▷", "").strip().replace(" / ", "-").replace(" ", "-").lower()
                     currSubSubCat = line.replace("## ▷", "").strip()
-            elif subURL=="storage":
+            else:  # storage
                 if line.startswith("## "):
-                    currMdSubheading = "#" + line.replace("## ", "").strip().replace(" / ", "-").replace(" ", "-").lower()
                     currSubCat = line.replace("## ", "").strip()
                     currSubSubCat = "/"
                 elif line.startswith("### "):
-                    currMdSubheading = "#" + line.replace("### ", "").strip().replace(" / ", "-").replace(" ", "-").lower()
                     currSubSubCat = line.replace("### ", "").strip()
 
-            # Remove links from subcategory titles (because the screw the format)
-            if 'http' in currSubCat: currSubCat = ''
-            if 'http' in currSubSubCat: currSubSubCat = ''
+            # Remove links from subcategory titles (because they screw the format)
+            if 'http' in currSubCat:
+                currSubCat = ''
+            if 'http' in currSubSubCat:
+                currSubSubCat = ''
 
         elif any(char.isalpha() for char in line): #If line has content
-            preText = f"{{\"{sectionName.replace(".md", "")}\", \"{currSubCat}\", \"{currSubSubCat}\"}}"
+            # Build a JSON-like prefix that encodes the current section and
+            # category hierarchy. Using single quotes for the outer string keeps
+            # the expression easy to read and avoids excessive escaping.
+            preText = (
+                f'{{"{sectionName.replace(".md", "")}", '
+                f'"{currSubCat}", "{currSubSubCat}"}}'
+            )
             if line.startswith("* "): line = line[2:]
             modified_lines.append(preText + line)
 
@@ -83,34 +91,31 @@ def extract_base64_sections(base64_page):
 
 
 
-def dlWikiChunk(fileName, icon, redditSubURL):
+def dlWikiChunk(fileName):
 
-    #first, try to get the chunk locally
+    # first, try to get the chunk locally
     try:
-        #First, try to get it from the local file
         print("Loading " + fileName + " from local file...")
         with open(fileName.lower(), 'r') as f:
             page = f.read()
         print("Loaded.\n")
-    #if not available locally, download the chunk
-    except:
-        if not fileName=='base64.md':
+    # if not available locally, download the chunk
+    except FileNotFoundError:
+        if fileName != 'base64.md':
             print("Local file not found. Downloading " + fileName + " from Github...")
-            page = requests.get("https://raw.githubusercontent.com/fmhy/FMHYedit/main/docs/" + fileName.lower()).text
-        elif fileName=='base64.md':
+            page = session.get(
+                "https://raw.githubusercontent.com/fmhy/FMHYedit/main/docs/" + fileName.lower(),
+                timeout=10,
+            ).text
+        else:
             print("Local file not found. Downloading rentry.co/FMHYBase64...")
-            page = requests.get("https://rentry.co/FMHYBase64/raw").text.replace("\r", "")
+            page = session.get("https://rentry.co/FMHYBase64/raw", timeout=10).text.replace("\r", "")
         print("Downloaded")
 
-    #add a pretext
-    redditBaseURL = "https://www.reddit.com/r/FREEMEDIAHECKYEAH/wiki/"
-    siteBaseURL = "https://fmhy.net/"
-    if not fileName=='base64.md':
-        pagesDevSiteSubURL = fileName.replace(".md", "").lower()
-        subURL = pagesDevSiteSubURL
-        lines = page.split('\n')
-        lines = addPretext(lines, fileName, siteBaseURL, subURL)
-    elif fileName=='base64.md':
+    if fileName != 'base64.md':
+        subURL = fileName.replace(".md", "").lower()
+        lines = addPretext(page.split('\n'), fileName, subURL)
+    else:
         lines = extract_base64_sections(page)
 
     return lines
@@ -120,35 +125,38 @@ def cleanLineForSearchMatchChecks(line):
     redditBaseURL = "https://www.reddit.com/r/FREEMEDIAHECKYEAH/wiki/"
     return line.replace(redditBaseURL, '/').replace(siteBaseURL, '/')
 
+WIKI_FILES = [
+    "VideoPiracyGuide.md",
+    "AI.md",
+    "Android-iOSGuide.md",
+    "AudioPiracyGuide.md",
+    "DownloadPiracyGuide.md",
+    "EDUPiracyGuide.md",
+    "GamingPiracyGuide.md",
+    "AdblockVPNGuide.md",
+    "System-Tools.md",
+    "File-Tools.md",
+    "Internet-Tools.md",
+    "Social-Media-Tools.md",
+    "Text-Tools.md",
+    "Video-Tools.md",
+    "MISCGuide.md",
+    "ReadingPiracyGuide.md",
+    "TorrentPiracyGuide.md",
+    "img-tools.md",
+    "gaming-tools.md",
+    "LinuxGuide.md",
+    "DEVTools.md",
+    "Non-English.md",
+    "STORAGE.md",
+    # "base64.md",
+    "NSFWPiracy.md",
+]
+
+
 def alternativeWikiIndexing():
-    wikiChunks = [
-        dlWikiChunk("VideoPiracyGuide.md", "📺", "video"),
-        dlWikiChunk("AI.md", "🤖", "ai"),
-        dlWikiChunk("Android-iOSGuide.md", "📱", "android"),
-        dlWikiChunk("AudioPiracyGuide.md", "🎵", "audio"),
-        dlWikiChunk("DownloadPiracyGuide.md", "💾", "download"),
-        dlWikiChunk("EDUPiracyGuide.md", "🧠", "edu"),
-        dlWikiChunk("GamingPiracyGuide.md", "🎮", "games"),
-        dlWikiChunk("AdblockVPNGuide.md", "📛", "adblock-vpn-privacy"),
-        dlWikiChunk("System-Tools.md", "💻", "system-tools"),
-        dlWikiChunk("File-Tools.md", "🗃️", "file-tools"),
-        dlWikiChunk("Internet-Tools.md", "🔗", "internet-tools"),
-        dlWikiChunk("Social-Media-Tools.md", "💬", "social-media"),
-        dlWikiChunk("Text-Tools.md", "📝", "text-tools"),
-        dlWikiChunk("Video-Tools.md", "📼", "video-tools"),
-        dlWikiChunk("MISCGuide.md", "📂", "misc"),
-        dlWikiChunk("ReadingPiracyGuide.md", "📗", "reading"),
-        dlWikiChunk("TorrentPiracyGuide.md", "🌀", "torrent"),
-        dlWikiChunk("img-tools.md", "📷", "img-tools"),
-        dlWikiChunk("gaming-tools.md", "👾", "gaming-tools"),
-        dlWikiChunk("LinuxGuide.md", "🐧🍏", "linux"),
-        dlWikiChunk("DEVTools.md", "🖥️", "dev-tools"),
-        dlWikiChunk("Non-English.md", "🌏", "non-eng"),
-        dlWikiChunk("STORAGE.md", "🗄️", "storage"),
-        #dlWikiChunk("base64.md", "🔑", "base64"),
-        dlWikiChunk("NSFWPiracy.md", "🌶", "https://saidit.net/s/freemediafuckyeah/wiki/index")
-    ]
-    return [item for sublist in wikiChunks for item in sublist] #Flatten a <list of lists of strings> into a <list of strings>
+    wikiChunks = [dlWikiChunk(name) for name in WIKI_FILES]
+    return [item for sublist in wikiChunks for item in sublist]  # Flatten
 #--------------------------------
 
 
@@ -157,17 +165,11 @@ def alternativeWikiIndexing():
 #     for line in alternativeWikiIndexing():
 #         f.write(line + '\n')
 
-# Instead of saving it to a file, save it into a string variable
-wiki_adapted_md = '\n'.join(alternativeWikiIndexing())
-
-# Remove from the lines in wiki_adapted_md any line that doesnt contain the character `⭐` or '🌟'
-wiki_adapted_starred_only_md = '\n'.join([line for line in wiki_adapted_md.split('\n') if '⭐' in line or '🌟' in line])
+# Instead of saving it to a file, save it into a string variable when run
+# as a script to avoid heavy work during import.
 
 
-
-import re
-
-def markdown_to_html_bookmarks(input_md_text, output_file):
+def markdown_to_html_bookmarks(input_md_text, output_file, starred_only=False):
     # Predefined folder name
     folder_name = "FMHY"
 
@@ -184,7 +186,7 @@ def markdown_to_html_bookmarks(input_md_text, output_file):
     hierarchy_pattern = re.compile(r'^\{"([^"]+)", "([^"]+)", "([^"]+)"\}')
 
     # Dictionary to hold bookmarks by hierarchy
-    bookmarks = {}
+    bookmarks = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 
     # Split the content by lines
     lines = markdown_content.split('\n')
@@ -198,19 +200,11 @@ def markdown_to_html_bookmarks(input_md_text, output_file):
 
         level1, level2, level3 = hierarchy_match.groups()
 
-        # Initialize nested dictionaries for hierarchy levels
-        if level1 not in bookmarks:
-            bookmarks[level1] = {}
-        if level2 not in bookmarks[level1]:
-            bookmarks[level1][level2] = {}
-        if level3 not in bookmarks[level1][level2]:
-            bookmarks[level1][level2][level3] = []
-
         # Find all matches in the line for URLs
         matches = url_pattern.findall(line)
 
-        # If the input_md_text is wiki_adapted_starred_only_md, only add the first match of url_pattern in each line
-        if input_md_text == wiki_adapted_starred_only_md:
+        # When generating the "starred only" export, only use the first match
+        if starred_only:
             matches = matches[:1]
 
         # Extract the description (text after the last match)
@@ -230,6 +224,20 @@ def markdown_to_html_bookmarks(input_md_text, output_file):
     def generate_html(bookmarks_dict, indent=1):
         html = ''
         for key, value in bookmarks_dict.items():
+            # Some sections don't have a sub-sub category.  In those cases a
+            # placeholder value of '/' is used during parsing so the hierarchy
+            # always has three levels.  We don't actually want a folder named
+            # '/' in the exported bookmarks, so when this placeholder is
+            # encountered we simply render its children directly without
+            # wrapping them in an extra <H3>/<DL> pair.
+            if key == '/':
+                if isinstance(value, dict):
+                    html += generate_html(value, indent)
+                else:
+                    for full_title, url in value:
+                        html += '    ' * indent + f'<DT><A HREF="{url}" ADD_DATE="0">{full_title}</A>\n'
+                continue
+
             html += '    ' * indent + f'<DT><H3>{key}</H3>\n'
             html += '    ' * indent + '<DL><p>\n'
             if isinstance(value, dict):
@@ -265,5 +273,14 @@ def markdown_to_html_bookmarks(input_md_text, output_file):
     #print(f'Successfully created bookmarks in {output_file}')
 
 # Example usage:
-markdown_to_html_bookmarks(wiki_adapted_md, 'fmhy_in_bookmarks.html')
-markdown_to_html_bookmarks(wiki_adapted_starred_only_md, 'fmhy_in_bookmarks_starred_only.html')
+if __name__ == "__main__":
+    wiki_adapted_md = '\n'.join(alternativeWikiIndexing())
+    wiki_adapted_starred_only_md = '\n'.join(
+        line for line in wiki_adapted_md.split('\n') if '⭐' in line or '🌟' in line
+    )
+    markdown_to_html_bookmarks(wiki_adapted_md, 'fmhy_in_bookmarks.html')
+    markdown_to_html_bookmarks(
+        wiki_adapted_starred_only_md,
+        'fmhy_in_bookmarks_starred_only.html',
+        starred_only=True,
+    )
