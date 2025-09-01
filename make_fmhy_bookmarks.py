@@ -1,13 +1,11 @@
 """Generate FMHY bookmark HTML files from FMHY markdown sections."""
 
-from __future__ import annotations
-
 import asyncio
 import base64
 import logging
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Any
 
 import aiohttp
 
@@ -23,9 +21,7 @@ class Config:
     site_base_url: str = "https://fmhy.net/"
     reddit_base_url: str = "https://www.reddit.com/r/FREEMEDIAHECKYEAH/wiki/"
     base64_rentry_url: str = "https://rentry.co/FMHYBase64/raw"
-    github_raw_base: str = (
-        "https://raw.githubusercontent.com/fmhy/edit/refs/heads/main/docs/"
-    )
+    github_raw_base: str = "https://raw.githubusercontent.com/fmhy/edit/refs/heads/main/docs/"
     folder_name: str = "FMHY"
     decode_base64: bool = True
 
@@ -36,7 +32,7 @@ class BookmarkLine:
 
     is_starred: bool  # line contains ⭐ or 🌟
     description_raw: str  # raw trailing text after last ")", may be empty
-    links: List[Tuple[str, str]]  # list of (title, url) exactly as matched
+    links: list[tuple[str, str]]  # list of (title, url) exactly as matched
 
 
 @dataclass
@@ -51,7 +47,7 @@ class WikiSection:
 CONFIG = Config()
 
 
-def parse_heading(line: str, sub_url: str) -> Tuple[str, str]:
+def parse_heading(line: str, sub_url: str) -> tuple[str, str]:
     """Parse heading line and return (subcategory, subsubcategory)."""
     if sub_url != "storage":
         if line.startswith("# ►"):
@@ -71,9 +67,7 @@ def clean_category_name(category: str) -> str:
     return "" if "http" in category else category
 
 
-def add_hierarchy_prefix(
-    lines: List[str], section_name: str, sub_url: str
-) -> List[str]:
+def add_hierarchy_prefix(lines: list[str], section_name: str, sub_url: str) -> list[str]:
     """Add hierarchy prefix to content lines."""
     modified_lines = []
     curr_subcat = ""
@@ -117,7 +111,7 @@ def decode_base64_content(input_string: str) -> str:
     return re.sub(pattern, base64_decode, input_string)
 
 
-def process_base64_sections(base64_page: str) -> List[str]:
+def process_base64_sections(base64_page: str) -> list[str]:
     """Process base64 page sections."""
     sections = base64_page.split("***")
     formatted_sections = []
@@ -125,10 +119,7 @@ def process_base64_sections(base64_page: str) -> List[str]:
     for section in sections:
         # Clean up section formatting
         clean_section = (
-            section.strip()
-            .replace("#### ", "")
-            .replace("\n\n", " - ")
-            .replace("\n", ", ")
+            section.strip().replace("#### ", "").replace("\n\n", " - ").replace("\n", ", ")
         )
 
         # Remove empty lines
@@ -139,9 +130,7 @@ def process_base64_sections(base64_page: str) -> List[str]:
         clean_section = decode_base64_content(clean_section)
 
         # Add base64 prefix
-        formatted_section = (
-            "[🔑Base64](https://rentry.co/FMHYBase64) ► " + clean_section
-        )
+        formatted_section = "[🔑Base64](https://rentry.co/FMHYBase64) ► " + clean_section
         formatted_sections.append(formatted_section)
 
     return formatted_sections
@@ -149,19 +138,17 @@ def process_base64_sections(base64_page: str) -> List[str]:
 
 async def download_wiki_content_async(
     session: aiohttp.ClientSession, filename: str
-) -> Tuple[str, List[str]]:
+) -> tuple[str, list[str]]:
     """Download and process wiki content asynchronously."""
     # First try to load locally
     try:
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             content = f.read()
         logger.info("Loaded %s locally", filename)
 
         if filename != "base64.md":
             sub_url = filename.replace(".md", "").lower()
-            return filename, add_hierarchy_prefix(
-                content.split("\n"), filename, sub_url
-            )
+            return filename, add_hierarchy_prefix(content.split("\n"), filename, sub_url)
         else:
             return filename, process_base64_sections(content)
     except FileNotFoundError:
@@ -174,7 +161,7 @@ async def download_wiki_content_async(
         else:
             url = CONFIG.base64_rentry_url
 
-        async with session.get(url, timeout=30) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
             resp.raise_for_status()
             content = await resp.text()
 
@@ -185,16 +172,14 @@ async def download_wiki_content_async(
             else:
                 logger.info("Downloaded %s", filename)
                 sub_url = filename.replace(".md", "").lower()
-                return filename, add_hierarchy_prefix(
-                    content.split("\n"), filename, sub_url
-                )
+                return filename, add_hierarchy_prefix(content.split("\n"), filename, sub_url)
 
     except Exception as e:
         logger.error("Failed to fetch %s (%s). Skipping.", filename, e)
         return filename, []
 
 
-async def collect_all_wiki_content_async() -> List[str]:
+async def collect_all_wiki_content_async() -> list[str]:
     """Collect and process all wiki sections concurrently."""
     async with aiohttp.ClientSession() as session:
         tasks = []
@@ -210,8 +195,9 @@ async def collect_all_wiki_content_async() -> List[str]:
             if isinstance(result, Exception):
                 logger.error("Download task failed: %s", result)
                 continue
-            filename, lines = result
-            all_lines.extend(lines)
+            if isinstance(result, tuple) and len(result) == 2:
+                filename, lines = result
+                all_lines.extend(lines)
 
         return all_lines
 
@@ -254,14 +240,12 @@ async def main_async() -> None:
 
     # Generate both bookmark files
     create_html_bookmarks(full_content, "fmhy_in_bookmarks.html")
-    create_html_bookmarks(
-        full_content, "fmhy_in_bookmarks_starred_only.html", starred_only=True
-    )
+    create_html_bookmarks(full_content, "fmhy_in_bookmarks_starred_only.html", starred_only=True)
 
     logger.info("Bookmark generation complete!")
 
 
-def parse_bookmark_line(line: str) -> Tuple[str, str, str, BookmarkLine | None]:
+def parse_bookmark_line(line: str) -> tuple[str, str, str, BookmarkLine | None]:
     """Parse a line to extract hierarchy and bookmark data."""
     url_pattern = re.compile(r"\[([^\]]+)\]\((https?://[^\)]+)\)")
     hierarchy_pattern = re.compile(r'^\{"([^"]+)", "([^"]+)", "([^"]+)"\}')
@@ -278,9 +262,7 @@ def parse_bookmark_line(line: str) -> Tuple[str, str, str, BookmarkLine | None]:
 
     # Extract raw description (text after last URL)
     last_paren = line.rfind(")")
-    description_raw = (
-        line[last_paren + 1 :].replace("**", "").strip() if last_paren != -1 else ""
-    )
+    description_raw = line[last_paren + 1 :].replace("**", "").strip() if last_paren != -1 else ""
 
     bookmark_line = BookmarkLine(
         is_starred=is_starred, description_raw=description_raw, links=matches
@@ -290,10 +272,10 @@ def parse_bookmark_line(line: str) -> Tuple[str, str, str, BookmarkLine | None]:
 
 
 def generate_bookmark_html(
-    bookmarks_dict: Dict[str, Dict[str, Dict[str, List[BookmarkLine]]]],
+    bookmarks_dict: Any,
     indent: int = 1,
     starred_only: bool = False,
-    path: Tuple[str, ...] = (),
+    path: tuple[str, ...] = (),
 ) -> str:
     """Generate HTML from bookmark dictionary."""
     html = ""
@@ -303,18 +285,25 @@ def generate_bookmark_html(
 
         current_path = path + (key,)
 
-        if isinstance(value, dict):
-            html += generate_bookmark_html(
-                value, indent + 1, starred_only, current_path
-            )
+        if isinstance(value, dict) and not isinstance(
+            next(iter(value.values()), None), BookmarkLine
+        ):
+            html += generate_bookmark_html(value, indent + 1, starred_only, current_path)
         else:
             # At leaf level - render BookmarkLine items
             # current_path should be (level1, level2, level3)
-            level1, level2, level3 = (
-                current_path if len(current_path) >= 3 else ("", "", "")
-            )
+            level1, level2, level3 = current_path if len(current_path) >= 3 else ("", "", "")
 
-            for bookmark_line in value:
+            # Handle case where value might be dict[str, list[BookmarkLine]] or list[BookmarkLine]
+            bookmark_lines = []
+            if isinstance(value, dict):
+                for subvalue in value.values():
+                    if isinstance(subvalue, list):
+                        bookmark_lines.extend(subvalue)
+            elif isinstance(value, list):
+                bookmark_lines = value
+
+            for bookmark_line in bookmark_lines:
                 # Skip if starred_only mode and line is not starred
                 if starred_only and not bookmark_line.is_starred:
                     continue
@@ -331,9 +320,7 @@ def generate_bookmark_html(
                 # Determine which links to render
                 links_to_render = bookmark_line.links
                 if starred_only:
-                    links_to_render = links_to_render[
-                        :1
-                    ]  # Only first link for starred content
+                    links_to_render = links_to_render[:1]  # Only first link for starred content
 
                 # Render each link
                 for title, url in links_to_render:
@@ -347,17 +334,13 @@ def generate_bookmark_html(
     return html
 
 
-def create_html_bookmarks(
-    content: str, output_file: str, starred_only: bool = False
-) -> None:
+def create_html_bookmarks(content: str, output_file: str, starred_only: bool = False) -> None:
     """Create HTML bookmark file from processed content."""
-    bookmarks: Dict[str, Dict[str, Dict[str, List[BookmarkLine]]]] = {}
+    bookmarks: dict[str, dict[str, dict[str, list[BookmarkLine]]]] = {}
 
     for line in content.split("\n"):
         level1, level2, level3, bookmark_line = parse_bookmark_line(line)
-        if (
-            not level1 or bookmark_line is None
-        ):  # Skip lines that don't match hierarchy pattern
+        if not level1 or bookmark_line is None:  # Skip lines that don't match hierarchy pattern
             continue
 
         # Initialize nested structure
